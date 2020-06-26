@@ -36,5 +36,18 @@ module.exports = [
         link:"/ECMA262/函数/"
       }
     ]
+  },
+  {
+    text:"browser",
+    items:[
+      {
+        text:"浏览器架构",
+        link:"/browser/浏览器架构/"
+      },
+      {
+        text:"浏览器安全",
+        link:"/browser/浏览器安全/"
+      }
+    ]
   }
 ]
