@@ -47,6 +47,10 @@ module.exports = [
       {
         text:"浏览器安全",
         link:"/browser/浏览器安全/"
+      },
+      {
+        text:"JS执行机制",
+        link:"/browser/JS执行机制/"
       }
     ]
   }
