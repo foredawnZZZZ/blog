@@ -302,7 +302,82 @@ function main() {
 重要的是词法作用域就是在写代码的时候就已经决定好了，和函数怎么调用没有关系
 ```
 
+#### 闭包
 
+根据词法作用域的规则内部函数访问了外部函数声明的变量,当通过调用一个外部函数返回一个内部函数后,即使外部函数的执行上下文已结束,但是内部函数引用外部函数的变量依然存在内存中,这些变量的集合就是闭包.
 
+```javascript
+function foo() {
+    var myName = " Fore "
+    let test1 = 1
+    const test2 = 2
+    var innerBar = {
+        getName:function(){
+            console.log(test1)
+            return myName
+        },
+        setName:function(newName){
+            myName = newName
+        }
+    }
+    return innerBar
+}
+var bar = foo()
+bar.setName(" Dawn ")
+bar.getName()
+console.log(bar.getName())
+根据词法作用域的规则,内部函数getName和setName两个函数都访问了外部foo函数内的变量所以当foo函数的返回值给了bar变量后,也就是foo执行完毕,getName和setName方法依然能够访问foo内部test1和myName两个变量,所以当foo函数执行上下文完成后,还是在位置上的是foo函数的closure,换句话说就是执行上下文弹栈了,但是由于getName和setName两个方法访问了函数内部的变量,所以test1和myName还是保存在内存
+```
 
+#### 闭包的回收
 
+见V8引擎的垃圾回收机制....
+
+## this指向
+
+在对象内部使用对象内部中的属性是一个非常普遍的需求,最开始js引擎是不支持的,所以出现this机制
+
+this和作用域链式不用的机制,基本没多大联系
+
+#### javascript中的this是什么?
+
+执行上下文包括变量环境,词法环境和外部环境,this四大部分;this是和执行上下文绑定的,也就是说每个执行上下文中都有一个 this 
+
+执行上下文主要分为三种——全局执行上下文、函数执行上下文和 eval 执行上下文，所以对应的 this 也只有这三种——全局执行上下文中的 this、函数中的 this 和 eval 中的 this。 (eval用的比较少)
+
+- 全局执行上下文中的this指向的是window对象
+- 函数执行上下文中的this
+  - 函数调用模式,指向的是window对象,在全局环境中调用这个函数,内部指向的是window
+  - 借用模式,通过call,apply,bind方式修改this指向
+  - 对象调用模式,使用对象内部来调用其内部的一个方法,this指向这个对象
+  - 构造函数中设置,其实是new操作符改变的 this指向(new的四个步骤)
+  - 特殊的this指向1:注册事件中的事件处理函数.this指向的是事件源(那个DOM)
+  - 特殊的this指向2:定时器延时器中this指向的window
+
+#### this的缺陷和解决办法
+
+- 嵌套函数中的this不会从外部函数中继承
+
+```javascript
+var myObj = {
+  name : " foredawn ", 
+  showThis: function(){
+    console.log(this)
+    var _this = this;
+    function bar(){console.log(_this)}
+    bar()
+  }
+}
+myObj.showThis()
+函数 bar 中的 this 指向的是全局 window 对象，而函数 showThis 中的 this 指向的是 myObj 对象
+
+解决办法:
+1.在外部函数中声明一个变量去存储this,在内部函数去使用这个变量
+2.使用ES6箭头函数,箭头函数不会去创建自己的执行上下文,箭头函数指向取决于外部函数
+```
+
+- 普通函数中的this默认指向全局对象window
+
+因为在实际工作中，我们并不希望函数执行上下文中的 this 默认指向全局对象，因为这样会打破数据的边界，造成一些误操作。如果要让函数执行上下文中的 this 指向某个对象，最好的方式是通过 call 方法来显示调用。
+
+这个问题可以通过设置 JavaScript 的“严格模式”来解决。在严格模式下，默认执行一个函数，其函数的执行上下文中的 this 值是 undefined，这就解决上面的问题了。
