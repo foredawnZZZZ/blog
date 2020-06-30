@@ -51,6 +51,14 @@ module.exports = [
       {
         text:"JS执行机制",
         link:"/browser/JS执行机制/"
+      },
+      {
+        text:"JS内存机制",
+        link:"/browser/JS内存机制/"
+      },
+      {
+        text: "浏览器滚动行为",
+        link:"/browser/浏览器滚动行为/"
       }
     ]
   }
