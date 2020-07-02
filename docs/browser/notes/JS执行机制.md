@@ -113,8 +113,8 @@ VariableEnvironment:
 ```javascript
 var a = 2
 function add(){
-var b = 10
-return  a+b
+  var b = 10
+  return  a+b
 }
 add()
 创建了全局执行上下文 包含声明的函数和变量；
