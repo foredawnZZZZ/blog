@@ -26,12 +26,5 @@ module.exports = [
     children: [
       '/browser/notes/JS内存机制'
     ]
-  },
-  {
-    title: "浏览器滚动行为",
-    collaspsable: true,
-    children: [
-      '/browser/notes/浏览器滚动行为'
-    ]
   }
 ]

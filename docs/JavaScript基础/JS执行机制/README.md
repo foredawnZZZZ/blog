@@ -1,0 +1,5 @@
+ - **了解trycath内部机制**
+ - **EventLoop机制**
+ - **宏任务和微任务**
+ - **使用Promise实现串行，快速分析异步嵌套问题**
+ - **Node与EventLoop的差异**

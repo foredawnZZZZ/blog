@@ -1,0 +1,3 @@
+ - **掌握React和vue传统跨组件通信**
+ - **Vuex管理数据流**
+ - **Redux管理数据流以及中间件（thunk，saga）**

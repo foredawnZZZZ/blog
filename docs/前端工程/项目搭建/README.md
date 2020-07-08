@@ -1,0 +1,4 @@
+ - **理解npm与yarn原理**
+ - **理解Babel，EsLint的原理和常用配置**
+ - **熟练使用webpack**
+ - **了解前端代码兼容方案，Polyfill**
