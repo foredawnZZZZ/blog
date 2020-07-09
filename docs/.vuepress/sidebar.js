@@ -1,8 +1,5 @@
 module.exports = {
-  // '/Command/': require('../Command/sidebar'),
-  // '/ECMA262/': require('../ECMA262/sidebar'),
-  // '/browser/': require('../browser/sidebar'),
-  // '/框架和库类/': require('../框架和库类/sidebar
+  '/框架和类库/': require('../框架和类库/sidebar'),
   '/计算机基础/': require('../计算机基础/sidebar'),
   '/前端工程/': require('../前端工程/sidebar'),
   '/数据结构与算法/': require('../数据结构与算法/sidebar'),

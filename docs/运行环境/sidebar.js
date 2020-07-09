@@ -3,7 +3,9 @@ module.exports = [
     title: "浏览器工作",
     collapsable: true,
     children: [
-      '/运行环境/notes/浏览器工作'
+      '/运行环境/notes/浏览器架构',
+      '/运行环境/notes/导航流程',
+      '/运行环境/notes/垃圾回收'
     ]
   },
   {

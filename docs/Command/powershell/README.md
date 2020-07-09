@@ -1,1 +1,0 @@
-# powershell命令
