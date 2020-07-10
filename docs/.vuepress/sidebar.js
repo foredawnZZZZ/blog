@@ -5,6 +5,6 @@ module.exports = {
   '/数据结构与算法/': require('../数据结构与算法/sidebar'),
   '/运行环境/': require('../运行环境/sidebar'),
   '/HTML与CSS/': require('../HTML与CSS/sidebar'),
-  '/JavaScript基础/': require('../JavaScript基础/sidebar'),
-  '/项目和业务/': require('../项目和业务/sidebar')
+  '/项目和业务/': require('../项目和业务/sidebar'),
+  '/JavaScript基础/': require('../JavaScript基础/sidebar')
 }
