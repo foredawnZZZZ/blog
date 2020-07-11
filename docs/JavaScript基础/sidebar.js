@@ -3,7 +3,8 @@ module.exports = [
     title: "变量类型与运算",
     collapsable: true,
     children: [
-      '/JavaScript基础/notes/变量类型与运算'
+      '/JavaScript基础/notes/JavaScript数据类型',
+      '/JavaScript基础/notes/JavaScript类型转换'
     ]
   },
   {
