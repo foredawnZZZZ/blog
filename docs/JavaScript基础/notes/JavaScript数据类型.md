@@ -68,4 +68,7 @@ var name2 = name.substring(2);
 
 #### 特殊对象
  - 宿主对象（指运行环境下的：操作系统，浏览器BOM,DOM）ECMA262未通过创建的
- - 内置内向（js语言自带的，工具对象）：特殊的Math，JSON，Global（parseInt，eval（），encodeURI）
+ - 内置对象 个人理解就是能被new的和不能被new的
+ - Math对象 是一个内置对象 不是函数式对象（理解就是不能new）只能操作Number类型的BigInt不可以
+ - JSON MDN定义他就是一个语法
+ - Global （encodeURI，parenInt，eval（））

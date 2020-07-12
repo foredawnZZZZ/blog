@@ -1,2 +1,3 @@
 ## ECMA262标准
-#### Object.assign()
+ - Object.assign()
+ - Object.freeze()

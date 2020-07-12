@@ -24,7 +24,7 @@ module.exports = [
     title: "Vue",
     collaspsable: true,
     children: [
-      '/框架和类库/notes/Vue'
+      '/框架和类库/notes/Vue基础'
     ]
   },
   {
