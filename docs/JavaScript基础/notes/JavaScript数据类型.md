@@ -65,3 +65,7 @@ var name2 = name.substring(2);
 // 创建一个String的包装类型实例,在实例上调用substring方法,销毁实例
 ```
 整个拆箱过程中如果是Number就调用valueOf是String就调用toString
+
+#### 特殊对象
+ - 宿主对象（指运行环境下的：操作系统，浏览器BOM,DOM）ECMA262未通过创建的
+ - 内置内向（js语言自带的，工具对象）：特殊的Math，JSON，Global（parseInt，eval（），encodeURI）

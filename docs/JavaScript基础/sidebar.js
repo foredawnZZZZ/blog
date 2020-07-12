@@ -4,7 +4,8 @@ module.exports = [
     collapsable: true,
     children: [
       '/JavaScript基础/notes/JavaScript数据类型',
-      '/JavaScript基础/notes/JavaScript类型转换'
+      '/JavaScript基础/notes/JavaScript类型转换',
+      '/JavaScript基础/notes/JavaScript判断类型'
     ]
   },
   {
