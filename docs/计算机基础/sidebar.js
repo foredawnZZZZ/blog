@@ -17,7 +17,8 @@ module.exports = [
     title: "网络协议",
     collaspsable: true,
     children: [
-      '/计算机基础/notes/TCP链接'
+      '/计算机基础/notes/TCP链接',
+      '/计算机基础/notes/HTTP协议结构'
     ]
   }
 ]

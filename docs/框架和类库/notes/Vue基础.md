@@ -71,4 +71,4 @@ v-show与v-if的区别
  - **如果v-for作用于组件上,而不希望将item自动注入到组件内部,使得组件与v-for的运作紧密耦合,可以使用`is`**
 
 <a href="https://codepen.io/foredawnzzzz/pen/eYJjEbM?editors=1011">Vue-条件与列表渲染实践</a>
-
+<!-- <a href="../../JavaScript基础/notes/JavaScript判断类型">123</a> -->

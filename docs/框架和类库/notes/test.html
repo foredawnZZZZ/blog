@@ -1,34 +1,70 @@
 <!DOCTYPE html>
 <html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Document</title>
+        <script src="https://cdn.bootcdn.net/ajax/libs/vue/2.6.11/vue.js"></script>
+    </head>
 
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Document</title>
-  <script src="https://cdn.bootcdn.net/ajax/libs/vue/2.6.11/vue.js"></script>
+    <body>
+        <div id="app">
+            <button-counter :count="count"></button-counter>
+            <button-counter :count="count"></button-counter>
+            <button-counter :count="count"></button-counter>
+            <button-counter :count="count"></button-counter>
+            <button-counter :count="count"></button-counter>
 
-</head>
+            <base-input v-model="lovingVue"></base-input>
+            <p>{{lovingVue}}</p>
+            
+        </div>
+        <script>
+            var ComponentA = {
+                data() {
+                    return {
+                        msg: "文字",
+                    };
+                },
+                template: `<p>{{msg}}</p>`,
+            };
 
-<body>
-  <div id="app">
-    <div>{{name}}</div>
-    <button @click="changeDivTxt">test</button>
-  </div>
-  <script>
-    // Vue.componet("")
+            Vue.component("button-counter", {
+                props: ["count"],
+                data: function () {
+                    return {
+                        myCount: this.count,
+                    };
+                },
+                template: `<button @click="myCount++">test clicked {{myCount}} -- <ComponentA></ComponentA></button>`,
+                components: {
+                    ComponentA,
+                },
+            });
 
-    // var vm = new Vue({
-    //   el: "#app",
-    //   data: {
-    //     name: "00xx1",
-    //   },
-    //   methods: {
-    //     changeDivTxt() {
-    //       console.log(this.name);
-    //     }
-    //   }
-    // })
-  </script>
-</body>
+            Vue.component("base-input",{
+              model: {
+                prop: 'value',
+                event:'change'
+              },
+              props: {
+                value: {
+                  type: String,
+                  default: ""
+                }
+              },
+              template:`<input type="text" :value="value" @input="$emit('change',$event.target.value)">`
+            })
 
+            var vm = new Vue({
+                el: "#app",
+                data: {
+                    count: 0,
+                    list: [1, 2, 3, 4],
+                    lovingVue: "foreDawn!"
+                }
+            });
+
+        </script>
+    </body>
 </html>
