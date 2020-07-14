@@ -1,70 +1,74 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Document</title>
-        <script src="https://cdn.bootcdn.net/ajax/libs/vue/2.6.11/vue.js"></script>
-    </head>
 
-    <body>
-        <div id="app">
-            <button-counter :count="count"></button-counter>
-            <button-counter :count="count"></button-counter>
-            <button-counter :count="count"></button-counter>
-            <button-counter :count="count"></button-counter>
-            <button-counter :count="count"></button-counter>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Document</title>
+</head>
 
-            <base-input v-model="lovingVue"></base-input>
-            <p>{{lovingVue}}</p>
-            
-        </div>
-        <script>
-            var ComponentA = {
-                data() {
-                    return {
-                        msg: "文字",
-                    };
-                },
-                template: `<p>{{msg}}</p>`,
-            };
+<body>
+  <script>
+    const oldArrayPrototype = Array.prototype;
+    const arrProto = Object.create(oldArrayPrototype);
+    const Mutations = ["pop", "push", "shift", "unshfit", "splice", "sort"]
+    Mutations.forEach(methodName => {
+      arrProto[methodName] = function () {
+        upDataChangeView();
+        oldArrayPrototype[methodName].call(this, ...arguments);
+      }
+    })
 
-            Vue.component("button-counter", {
-                props: ["count"],
-                data: function () {
-                    return {
-                        myCount: this.count,
-                    };
-                },
-                template: `<button @click="myCount++">test clicked {{myCount}} -- <ComponentA></ComponentA></button>`,
-                components: {
-                    ComponentA,
-                },
-            });
+    function upDataChangeView() {
+      console.log("视图更新了")
+    }
 
-            Vue.component("base-input",{
-              model: {
-                prop: 'value',
-                event:'change'
-              },
-              props: {
-                value: {
-                  type: String,
-                  default: ""
-                }
-              },
-              template:`<input type="text" :value="value" @input="$emit('change',$event.target.value)">`
-            })
+    function defineReactive(obj, key, value) {
+      observe(value);
+      Object.defineProperty(obj, key, {
+        get() {
+          return value
+        },
+        set(newVal) {
+          if (newVal !== value) {
+            observe(newVal);
+            value = newVal;
+            upDataChangeView();
+          }
+        }
+      })
+    }
 
-            var vm = new Vue({
-                el: "#app",
-                data: {
-                    count: 0,
-                    list: [1, 2, 3, 4],
-                    lovingVue: "foreDawn!"
-                }
-            });
+    function observe(obj) {
+      if (typeof obj !== "object" || obj == null) {
+        return
+      }
 
-        </script>
-    </body>
+      if (Array.isArray(obj)) {
+        obj.__proto__ = arrProto;
+      }
+
+      for (let key in obj) {
+        defineReactive(obj, key, obj[key]);
+      }
+    }
+    var obj = {
+      name: "fore",
+      age: 17,
+      info: {
+        desc: "Object.defineProperty需要深度监听"
+      },
+      tools: [1, 2, 34],
+      arr: [123123]
+    }
+    observe(obj)
+    obj.tools = {
+      id: 1,
+      title: 123
+    }
+    obj.tools.id = 10;
+    console.log(obj)
+  </script>
+</body>
+
 </html>
