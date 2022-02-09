@@ -26,6 +26,7 @@ module.exports = [
     children: [
       '/框架和类库/notes/Vue初始化',
       '/框架和类库/notes/Vue组件化机制',
+      '/框架和类库/notes/响应式系统',
       '/框架和类库/notes/VueRouter',
       '/框架和类库/notes/Vuex',
     ]

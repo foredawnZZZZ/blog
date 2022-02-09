@@ -1134,3 +1134,150 @@ export function resolveAsset (
 局部注册的流程很清晰，在组件的实例化阶段会合并components选项合并到vm.$options.components这样也会在resolveAsset上拿到组件的构造函数，不同点在于全局注册是在大Vue的options下，在所有组件创建的过程中，都会从全局的$options.components扩展到当前实例上的$options.components这就是全局注册可以在任意地方使用的原因
 
 ## 异步组件/动态组件
+为了解决主App.js体积代码减少，非首屏组件设计成异步组件，按需加载。此时Vue.component方法的第二个参数需要接受一个函数，并且需要resolve和reject两个参数，由于参数不是对象所以不会执行extend方法去获取构造函数，但是可以执行createComponent
+```javascript
+export function createComponent (
+  Ctor: Class<Component> | Function | Object | void,
+  data: ?VNodeData,
+  context: Component,
+  children: ?Array<VNode>,
+  tag?: string
+): VNode | Array<VNode> | void {
+  if (isUndef(Ctor)) {
+    return
+  }
+
+  const baseCtor = context.$options._base
+
+  // plain options object: turn it into a constructor
+  if (isObject(Ctor)) {
+    Ctor = baseCtor.extend(Ctor)
+  }
+  
+  // ...
+
+  // async component
+  let asyncFactory
+  if (isUndef(Ctor.cid)) {
+    asyncFactory = Ctor
+    Ctor = resolveAsyncComponent(asyncFactory, baseCtor, context)
+    if (Ctor === undefined) {
+      // return a placeholder node for async component, which is rendered
+      // as a comment node but preserves all the raw information for the node.
+      // the information will be used for async server-rendering and hydration.
+      return createAsyncPlaceholder(
+        asyncFactory,
+        data,
+        context,
+        children,
+        tag
+      )
+    }
+  }
+}
+```
+没有生成出构造函数所以执行了resolveAsyncComponent方法它定义在`src/core/vdom/helpers/resolve-async-component.js`
+```javascript
+export function resolveAsyncComponent (
+  factory: Function,
+  baseCtor: Class<Component>,
+  context: Component
+): Class<Component> | void {
+  if (isTrue(factory.error) && isDef(factory.errorComp)) {
+    return factory.errorComp
+  }
+
+  if (isDef(factory.resolved)) {
+    return factory.resolved
+  }
+
+  if (isTrue(factory.loading) && isDef(factory.loadingComp)) {
+    return factory.loadingComp
+  }
+
+  if (isDef(factory.contexts)) {
+    // already pending
+    factory.contexts.push(context)
+  } else {
+    const contexts = factory.contexts = [context]
+    let sync = true
+
+    const forceRender = () => {
+      for (let i = 0, l = contexts.length; i < l; i++) {
+        contexts[i].$forceUpdate()
+      }
+    }
+
+    const resolve = once((res: Object | Class<Component>) => {
+      // cache resolved
+      factory.resolved = ensureCtor(res, baseCtor)
+      // invoke callbacks only if this is not a synchronous resolve
+      // (async resolves are shimmed as synchronous during SSR)
+      if (!sync) {
+        forceRender()
+      }
+    })
+
+    const reject = once(reason => {
+      process.env.NODE_ENV !== 'production' && warn(
+        `Failed to resolve async component: ${String(factory)}` +
+        (reason ? `\nReason: ${reason}` : '')
+      )
+      if (isDef(factory.errorComp)) {
+        factory.error = true
+        forceRender()
+      }
+    })
+
+    const res = factory(resolve, reject)
+
+    if (isObject(res)) {
+      if (typeof res.then === 'function') {
+        // () => Promise
+        if (isUndef(factory.resolved)) {
+          res.then(resolve, reject)
+        }
+      } else if (isDef(res.component) && typeof res.component.then === 'function') {
+        res.component.then(resolve, reject)
+
+        if (isDef(res.error)) {
+          factory.errorComp = ensureCtor(res.error, baseCtor)
+        }
+
+        if (isDef(res.loading)) {
+          factory.loadingComp = ensureCtor(res.loading, baseCtor)
+          if (res.delay === 0) {
+            factory.loading = true
+          } else {
+            setTimeout(() => {
+              if (isUndef(factory.resolved) && isUndef(factory.error)) {
+                factory.loading = true
+                forceRender()
+              }
+            }, res.delay || 200)
+          }
+        }
+
+        if (isDef(res.timeout)) {
+          setTimeout(() => {
+            if (isUndef(factory.resolved)) {
+              reject(
+                process.env.NODE_ENV !== 'production'
+                  ? `timeout (${res.timeout}ms)`
+                  : null
+              )
+            }
+          }, res.timeout)
+        }
+      }
+    }
+
+    sync = false
+    // return in case resolved synchronously
+    return factory.loading
+      ? factory.loadingComp
+      : factory.resolved
+  }
+}
+```
+这个方法同时处理了三种异步组件的创建方式，工厂函数，promise（webpack2.0+版本语法糖），高级异步组件（支持loading组件，最大请求时长，err组件等配置项）首先考虑到多个地方使用同异步组件而不需要多次加载，使用once函数做个了包装 设置了闭包与标志位确认该方法只执行一次；其次ensureCtor方法，为确保能够找到异步组件js定义的组件对象，如果是普通对象直接调用extend方法返回构造函数，最后forceRender方法执行每个异步组件实例身上的$forceUpdate方法，让对应的组件的渲染watcher执行update方法强制视图重新渲染，因为vue的数据驱动视图是根据响应式的，但是在异步组件的加载过程当中没有任何数据发生变化
