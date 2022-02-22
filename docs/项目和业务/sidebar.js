@@ -19,5 +19,12 @@ module.exports = [
       children: [
         '/项目和业务/notes/性能优化'
       ]
+    },
+    {
+      title: "服务端渲染",
+      collapsable: true,
+      children: [
+        '/项目和业务/notes/服务端渲染'
+      ]
     }
   ]
