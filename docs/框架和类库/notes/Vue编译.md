@@ -260,5 +260,168 @@ function compile(template: string, options?: CompilerOptions): CompiledResult {
 }
 ```
 
-compile 函数在执行 createCompileToFunctionFn 的时候作为参数传入，核心编译过程只有一行`const compiled = baseCompile(template, finalOptions)`baseCompile 在执行 createCompilerCreator 方法时作为参数传入，所以最后回到了createCompiler方法
-之所以这么绕是因为vue.js在不同平台下都需要编译，因此编译过程中的编译配置（baseOptions）又有所不同。而编译过程会被多次执行，但这同一个平台下每一次的编译过程配置又是相同的，为了不让这些配置在每次编译过程都通过参数传入，所以利用函数柯里化保留了编译配置。
+compile 函数在执行 createCompileToFunctionFn 的时候作为参数传入，核心编译过程只有一行`const compiled = baseCompile(template, finalOptions)`baseCompile 在执行 createCompilerCreator 方法时作为参数传入，所以最后回到了 createCompiler 方法
+之所以这么绕是因为 vue.js 在不同平台下都需要编译，因此编译过程中的编译配置（baseOptions）又有所不同。而编译过程会被多次执行，但这同一个平台下每一次的编译过程配置又是相同的，为了不让这些配置在每次编译过程都通过参数传入，所以利用函数柯里化保留了编译配置。
+
+## parse
+
+编译的首要过程就是通过解析模板，创建 AST（抽象语法树）对源代码的抽象语法结构的树状表现形式，（babel，eslint 等）parse 函数定义在`src\compiler\parser\index.js`
+
+```javascript
+export function parse(
+ template: string,
+ options: CompilerOptions
+): ASTElement | void {
+ // ... ...
+ parseHTML(template, {
+  // 解析过程中的回调函数，生成 AST
+  start(tag, attrs, unary, start, end) {// ... ...},
+  end(tag, start, end) {// ... ...},
+  chars(text: string, start: number, end: number) {// ... ...},
+  comment(text: string, start, end) {// ... ...},
+ });
+ return root;
+}
+```
+
+`parse` 函数接受 `template` 作为传入的模板，`options` 实际上是和平台相关的配置，它定义在`src\platforms\web\compiler\options.js`，（web 和 weex）
+
+```javascript
+warn = options.warn || baseWarn;
+
+platformIsPreTag = options.isPreTag || no;
+platformMustUseProp = options.mustUseProp || no;
+platformGetTagNamespace = options.getTagNamespace || no;
+const isReservedTag = options.isReservedTag || no;
+maybeComponent = (el: ASTElement) => !!el.component || !isReservedTag(el.tag);
+
+transforms = pluckModuleFunction(options.modules, "transformNode");
+preTransforms = pluckModuleFunction(options.modules, "preTransformNode");
+postTransforms = pluckModuleFunction(options.modules, "postTransformNode");
+
+delimiters = options.delimiters;
+```
+
+从 `options` 中获取方法和配置后开始进行解析 HTML 模板，`parseHTML(template, options)`这个方法定义`src\compiler\parser\html-parser.js`
+
+```javascript
+export function parseHTML(html, options) {
+ // ... ...
+ let lastTag;
+ while (html) {
+  if (!lastTag || !isPlainTextElement(lastTag)) {
+   let textEnd = html.indexOf("<");
+   if (textEnd === 0) {
+    if (matchComment) {
+     advance(commentLength);
+     continue;
+    }
+    if (matchDoctype) {
+     advance(doctypeLength);
+     continue;
+    }
+    if (matchEndTag) {
+     advance(endTagLength);
+     parseEndTag();
+     continue;
+    }
+    if (matchStartTag) {
+     parseStartTag();
+     handleStartTag();
+     continue;
+    }
+   }
+   handleText();
+   advance(textLength);
+  } else {
+   handlePlainTextElement();
+   parseEndTag();
+  }
+ }
+
+ function advance(n) {
+  index += n;
+  html = html.substring(n);
+ }
+}
+```
+
+`parseHTML` 的逻辑就是循环解析 `template`，用正则做各种匹配，对于不同情况分别进行不同的处理，直到整个 `template` 解析完利用 `advance` 方法一直前进模板字符串，直到字符串末尾。
+
+```javascript
+// 匹配过程中主要用到的正则表达式 包含注释节点，文档类型节点，开始闭合标签
+const attribute =
+ /^\s*([^\s"'<>\/=]+)(?:\s*(=)\s*(?:"([^"]*)"+|'([^']*)'+|([^\s"'=<>`]+)))?/;
+const dynamicArgAttribute =
+ /^\s*((?:v-[\w-]+:|@|:|#)\[[^=]+\][^\s"'<>\/=]*)(?:\s*(=)\s*(?:"([^"]*)"+|'([^']*)'+|([^\s"'=<>`]+)))?/;
+const ncname = `[a-zA-Z_][\\-\\.0-9_a-zA-Z${unicodeRegExp.source}]*`;
+const qnameCapture = `((?:${ncname}\\:)?${ncname})`;
+const startTagOpen = new RegExp(`^<${qnameCapture}`);
+const startTagClose = /^\s*(\/?)>/;
+const endTag = new RegExp(`^<\\/${qnameCapture}[^>]*>`);
+const doctype = /^<!DOCTYPE [^>]+>/i;
+const comment = /^<!\--/;
+const conditionalComment = /^<!\[/;
+```
+
+<!-- 暂时了解到这里吧 看不懂正则并且代码太多了比较晦涩········· -->
+
+## optimize
+
+当模板经过 `parse` 过程后，会生成 `AST` 树，`optimize` 是一个对 `AST` 树进行优化的过程，因为 `Vue` 是数据驱动，但是并不是所有的数据都是响应式的，很多数据经过首次渲染之后，数据不会在发生改变 `dom` 结构也永远不会发生改变，这样可以在 `patch` 过程中跳过对他们的对比;`optimize`方法定义在`src\compiler\optimizer.js`
+
+```javascript
+export function optimize(root: ?ASTElement, options: CompilerOptions) {
+ if (!root) return;
+ isStaticKey = genStaticKeysCached(options.staticKeys || "");
+ isPlatformReservedTag = options.isReservedTag || no;
+ // first pass: mark all non-static nodes.
+ // 标记静态节点
+ markStatic(root);
+ // second pass: mark static roots.
+ // 标记静态根节点
+ markStaticRoots(root, false);
+}
+```
+
+在编译阶段将一些 `AST` 节点转换为静态节点，所以 `optimize` 的过程实际上就是标记静态节点和标记静态根节点。
+
+```javascript
+function markStatic(node: ASTNode) {
+ // 判断当前 astNode 是否是静态的
+ node.static = isStatic(node);
+ // 元素节点
+ if (node.type === 1) {
+  // do not make component slot content static. this avoids
+  // 1. components not able to mutate slot nodes
+  // 2. static slot content fails for hot-reloading
+  // 是组件，不是slot，没有inline-template
+  if (
+   !isPlatformReservedTag(node.tag) &&
+   node.tag !== "slot" &&
+   node.attrsMap["inline-template"] == null
+  ) {
+   return;
+  }
+  // 遍历 children
+  for (let i = 0, l = node.children.length; i < l; i++) {
+   const child = node.children[i];
+   // 标记静态
+   markStatic(child);
+   if (!child.static) {
+    // 如果有一个 child 不是 static，当前 node 不是static
+    node.static = false;
+   }
+  }
+  if (node.ifConditions) {
+   for (let i = 1, l = node.ifConditions.length; i < l; i++) {
+    const block = node.ifConditions[i].block;
+    markStatic(block);
+    if (!block.static) {
+     node.static = false;
+    }
+   }
+  }
+ }
+}
+```
