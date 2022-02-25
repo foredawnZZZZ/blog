@@ -265,7 +265,7 @@ compile 函数在执行 createCompileToFunctionFn 的时候作为参数传入，
 
 ## parse
 
-编译的首要过程就是通过解析模板，创建 AST（抽象语法树）对源代码的抽象语法结构的树状表现形式，（babel，eslint 等）parse 函数定义在`src\compiler\parser\index.js`
+编译的首要过程就是通过解析模板，创建 `AST`（抽象语法树）对源代码的抽象语法结构的树状表现形式，（babel，eslint 等）`parse` 函数定义在`src\compiler\parser\index.js`
 
 ```javascript
 export function parse(
@@ -423,5 +423,276 @@ function markStatic(node: ASTNode) {
    }
   }
  }
+}
+function isStatic(node: ASTNode): boolean {
+ // 表达式
+ if (node.type === 2) {
+  // expression
+  return false;
+ }
+ if (node.type === 3) {
+  // text
+  return true;
+ }
+ return !!(
+  node.pre || // pre
+  (!node.hasBindings && // no dynamic bindings
+   !node.if &&
+   !node.for && // not v-if or v-for or v-else
+   !isBuiltInTag(node.tag) && // not a built-in 不能是内置组件
+   isPlatformReservedTag(node.tag) && // not a component  不能是组件
+   !isDirectChildOfTemplateFor(node) && // 不能是v-for下的直接子节点
+   Object.keys(node).every(isStaticKey))
+ );
+}
+```
+
+`isStatic` 函数用于对 `AST` 节点是否需要标记静态做判断，如果是表达式就是非静态，纯文本是静态的；普通元素使用了 `v-pre` 是静态的 `v-if v-for` 等指令并且内置组件和平台保留标签并且不能是 `v-for` 下的直接子节点，满足这些则标记静态节点，对于一个普通元素则遍历他的 `children`，递归执行 `markStatic`，如果有一个节点不是静态的就将整个父节点标记为非静态 `ifConditions？？？？`
+
+```javascript
+function markStaticRoots(node: ASTNode, isInFor: boolean) {
+ if (node.type === 1) {
+  if (node.static || node.once) {
+   node.staticInFor = isInFor;
+  }
+  // For a node to qualify as a static root, it should have children that
+  // are not just static text. Otherwise the cost of hoisting out will
+  // outweigh the benefits and it's better off to just always render it fresh.
+  // 如果一个元素内只有文本节点，此时这个元素不是静态的Root
+  // Vue 认为这种优化会带来负面的影响
+  if (
+   node.static &&
+   node.children.length &&
+   !(node.children.length === 1 && node.children[0].type === 3)
+  ) {
+   node.staticRoot = true;
+   return;
+  } else {
+   node.staticRoot = false;
+  }
+  // 检测当前节点的子节点中是否有静态的Root
+  if (node.children) {
+   for (let i = 0, l = node.children.length; i < l; i++) {
+    markStaticRoots(node.children[i], isInFor || !!node.for);
+   }
+  }
+  if (node.ifConditions) {
+   for (let i = 1, l = node.ifConditions.length; i < l; i++) {
+    markStaticRoots(node.ifConditions[i].block, isInFor);
+   }
+  }
+ }
+}
+```
+
+<!-- 如果已经标记为静态节点或者v-once指令的节点， -->
+
+静态根节点的条件是，必须本身就是一个静态节点外，必须满足拥有 `children`，并且 `children` 不能只是一个文本节点（不知道为啥），遍历 `children` 递归调用 `markStaticRoots` `ifConditions？？？？`
+
+## codegen
+
+编译的最后一步就是把优化的 `AST` 树转换为可执行的代码，经过编译后会生成一个 `with` 语句
+
+```javascript
+with (this) {
+ return isShow
+  ? _c(
+     "ul",
+     {
+      staticClass: "list",
+      class: bindCls,
+     },
+     _l(data, function (item, index) {
+      return _c(
+       "li",
+       {
+        on: {
+         click: function ($event) {
+          clickItem(index);
+         },
+        },
+       },
+       [_v(_s(item) + ":" + _s(index))]
+      );
+     })
+    )
+  : _e();
+}
+```
+
+其他`_`方法定义在`src\core\instance\render-helpers\index.js`，`_c` 方法定义在`src\core\instance\render.js`
+
+```javascript
+vm._c = (a, b, c, d) => createElement(vm, a, b, c, d, false);
+export function installRenderHelpers(target: any) {
+ target._o = markOnce;
+ target._n = toNumber;
+ target._s = toString;
+ target._l = renderList;
+ target._t = renderSlot;
+ target._q = looseEqual;
+ target._i = looseIndexOf;
+ target._m = renderStatic;
+ target._f = resolveFilter;
+ target._k = checkKeyCodes;
+ target._b = bindObjectProps;
+ target._v = createTextVNode;
+ target._e = createEmptyVNode;
+ target._u = resolveScopedSlots;
+ target._g = bindObjectListeners;
+ target._d = bindDynamicKeys;
+ target._p = prependModifier;
+}
+```
+
+render 代码的生成过程
+
+```javascript
+export function generate(
+ ast: ASTElement | void,
+ options: CompilerOptions
+): CodegenResult {
+ const state = new CodegenState(options);
+ const code = ast ? genElement(ast, state) : '_c("div")';
+ return {
+  render: `with(this){return ${code}}`,
+  staticRenderFns: state.staticRenderFns,
+ };
+}
+```
+
+generate 函数定义在`src\compiler\codegen\index.js`中，先创建一个 CodegenState 的实例，再通过 genElement 方法生成一个 code，然后把 code 用`with(this){return ${code}}`包裹起来，
+
+```javascript
+export function genElement(el: ASTElement, state: CodegenState): string {
+ if (el.parent) {
+  el.pre = el.pre || el.parent.pre;
+ }
+
+ if (el.staticRoot && !el.staticProcessed) {
+  return genStatic(el, state);
+ } else if (el.once && !el.onceProcessed) {
+  return genOnce(el, state);
+ } else if (el.for && !el.forProcessed) {
+  return genFor(el, state);
+ } else if (el.if && !el.ifProcessed) {
+  return genIf(el, state);
+ } else if (el.tag === "template" && !el.slotTarget && !state.pre) {
+  return genChildren(el, state) || "void 0";
+ } else if (el.tag === "slot") {
+  return genSlot(el, state);
+ } else {
+  // component or element
+  let code;
+  if (el.component) {
+   code = genComponent(el.component, el, state);
+  } else {
+   let data;
+   if (!el.plain || (el.pre && state.maybeComponent(el))) {
+    // 生成元素的属性/指令/事件等
+    // 处理各种指令，包括 genDirectives（model/text/html）
+    data = genData(el, state);
+   }
+
+   const children = el.inlineTemplate ? null : genChildren(el, state, true);
+   code = `_c('${el.tag}'${
+    data ? `,${data}` : "" // data
+   }${
+    children ? `,${children}` : "" // children
+   })`;
+  }
+  // module transforms
+  for (let i = 0; i < state.transforms.length; i++) {
+   code = state.transforms[i](el, code);
+  }
+  return code;
+ }
+}
+```
+
+根据当前 AST 元素节点的属性执行不同的代码生成函数
+**genIf**
+
+```javascript
+export function genIf(
+ el: any,
+ state: CodegenState,
+ altGen?: Function,
+ altEmpty?: string
+): string {
+ el.ifProcessed = true; // avoid recursion
+ return genIfConditions(el.ifConditions.slice(), state, altGen, altEmpty);
+}
+
+function genIfConditions(
+ conditions: ASTIfConditions,
+ state: CodegenState,
+ altGen?: Function,
+ altEmpty?: string
+): string {
+ if (!conditions.length) {
+  // _e() --> createEmpyVNode()
+  return altEmpty || "_e()";
+ }
+
+ const condition = conditions.shift();
+ if (condition.exp) {
+  return `(${condition.exp})?${genTernaryExp(
+   condition.block
+  )}:${genIfConditions(conditions, state, altGen, altEmpty)}`;
+ } else {
+  return `${genTernaryExp(condition.block)}`;
+ }
+
+ // v-if with v-once should generate code like (a)?_m(0):_m(1)
+ function genTernaryExp(el) {
+  return altGen
+   ? altGen(el, state)
+   : el.once
+   ? genOnce(el, state)
+   : genElement(el, state);
+ }
+}
+```
+
+`genIf` 主要通过 `genIfConditions`，它是依次从 `conditions` 获取第一个 `condition`，然后通过 `condition.exp` 生成一点三元表达式的代码:后是递归调用 `genIfConditions`，如果存在多个 `conditions`，就生成多个三元表达式
+
+**genFor**
+
+```javascript
+export function genFor(
+ el: any,
+ state: CodegenState,
+ altGen?: Function,
+ altHelper?: string
+): string {
+ const exp = el.for;
+ const alias = el.alias;
+ const iterator1 = el.iterator1 ? `,${el.iterator1}` : "";
+ const iterator2 = el.iterator2 ? `,${el.iterator2}` : "";
+
+ if (
+  process.env.NODE_ENV !== "production" &&
+  state.maybeComponent(el) &&
+  el.tag !== "slot" &&
+  el.tag !== "template" &&
+  !el.key
+ ) {
+  state.warn(
+   `<${el.tag} v-for="${alias} in ${exp}">: component lists rendered with ` +
+    `v-for should have explicit keys. ` +
+    `See https://vuejs.org/guide/list.html#key for more info.`,
+   el.rawAttrsMap["v-for"],
+   true /* tip */
+  );
+ }
+
+ el.forProcessed = true; // avoid recursion
+ return (
+  `${altHelper || "_l"}((${exp}),` +
+  `function(${alias}${iterator1}${iterator2}){` +
+  `return ${(altGen || genElement)(el, state)}` +
+  "})"
+ );
 }
 ```
