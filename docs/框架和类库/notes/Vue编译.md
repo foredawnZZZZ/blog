@@ -655,7 +655,7 @@ function genIfConditions(
 }
 ```
 
-`genIf` 主要通过 `genIfConditions`，它是依次从 `conditions` 获取第一个 `condition`，然后通过 `condition.exp` 生成一点三元表达式的代码:后是递归调用 `genIfConditions`，如果存在多个 `conditions`，就生成多个三元表达式
+`genIf` 主要通过 `genIfConditions`，它是依次从 `conditions` 获取第一个 `condition`，然后通过 `condition.exp` 生成一点三元表达式的代码:后是递归调用 `genIfConditions`，如果存在多个 `conditions`，就生成多个三元表达式。genTernaryExp 在不考虑 v-once 的情况下返回 genElement
 
 **genFor**
 
@@ -694,5 +694,134 @@ export function genFor(
   `return ${(altGen || genElement)(el, state)}` +
   "})"
  );
+}
+```
+
+genFor 首先获取 AST 元素节点中关于 for 相关的属性，然后返回一个代码字符串
+
+**genData**
+
+```javascript
+export function genData(el: ASTElement, state: CodegenState): string {
+ let data = "{";
+
+ // directives first.
+ // directives may mutate the el's other properties before they are generated.
+ const dirs = genDirectives(el, state);
+ if (dirs) data += dirs + ",";
+
+ // key
+ if (el.key) {
+  data += `key:${el.key},`;
+ }
+ // ref
+ if (el.ref) {
+  data += `ref:${el.ref},`;
+ }
+ if (el.refInFor) {
+  data += `refInFor:true,`;
+ }
+ // pre
+ if (el.pre) {
+  data += `pre:true,`;
+ }
+ // record original tag name for components using "is" attribute
+ if (el.component) {
+  data += `tag:"${el.tag}",`;
+ }
+ // module data generation functions
+ for (let i = 0; i < state.dataGenFns.length; i++) {
+  data += state.dataGenFns[i](el);
+ }
+ // attributes
+ if (el.attrs) {
+  data += `attrs:${genProps(el.attrs)},`;
+ }
+ // DOM props
+ if (el.props) {
+  data += `domProps:${genProps(el.props)},`;
+ }
+ // event handlers
+ if (el.events) {
+  data += `${genHandlers(el.events, false)},`;
+ }
+ if (el.nativeEvents) {
+  data += `${genHandlers(el.nativeEvents, true)},`;
+ }
+ // slot target
+ // only for non-scoped slots
+ if (el.slotTarget && !el.slotScope) {
+  data += `slot:${el.slotTarget},`;
+ }
+ // scoped slots
+ if (el.scopedSlots) {
+  data += `${genScopedSlots(el, el.scopedSlots, state)},`;
+ }
+ // component v-model
+ if (el.model) {
+  data += `model:{value:${el.model.value},callback:${el.model.callback},expression:${el.model.expression}},`;
+ }
+ // inline-template
+ if (el.inlineTemplate) {
+  const inlineTemplate = genInlineTemplate(el, state);
+  if (inlineTemplate) {
+   data += `${inlineTemplate},`;
+  }
+ }
+ data = data.replace(/,$/, "") + "}";
+ // v-bind dynamic argument wrap
+ // v-bind with dynamic arguments must be applied using the same v-bind object
+ // merge helper so that class/style/mustUseProp attrs are handled correctly.
+ if (el.dynamicAttrs) {
+  data = `_b(${data},"${el.tag}",${genProps(el.dynamicAttrs)})`;
+ }
+ // v-bind data wrap
+ if (el.wrapData) {
+  data = el.wrapData(data);
+ }
+ // v-on data wrap
+ if (el.wrapListeners) {
+  data = el.wrapListeners(data);
+ }
+ return data;
+}
+```
+
+genData 函数就是根据 AST 元素节点的属性构造出一个 data 对象字符串，会在后面创建 vNode 对象时作为参数传入。
+**genChildren**
+
+```javascript
+export function genChildren(
+ el: ASTElement,
+ state: CodegenState,
+ checkSkip?: boolean,
+ altGenElement?: Function,
+ altGenNode?: Function
+): string | void {
+ const children = el.children;
+ if (children.length) {
+  const el: any = children[0];
+  // optimize single v-for
+  if (
+   children.length === 1 &&
+   el.for &&
+   el.tag !== "template" &&
+   el.tag !== "slot"
+  ) {
+   const normalizationType = checkSkip
+    ? state.maybeComponent(el)
+      ? `,1`
+      : `,0`
+    : ``;
+   return `${(altGenElement || genElement)(el, state)}${normalizationType}`;
+  }
+  const normalizationType = checkSkip
+   ? getNormalizationType(children, state.maybeComponent)
+   : 0;
+  const gen = altGenNode || genNode;
+  return `[${children.map((c) => gen(c, state)).join(",")}]${
+   normalizationType ? `,${normalizationType}` : ""
+  }`;
+ }
 }
 ```
