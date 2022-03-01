@@ -29,6 +29,7 @@ module.exports = [
       '/框架和类库/notes/Vue响应式系统',
       '/框架和类库/notes/Vue编译',
       '/框架和类库/notes/Vue扩展-1',
+      '/框架和类库/notes/Vue扩展-2',
       '/框架和类库/notes/VueRouter',
       '/框架和类库/notes/Vuex',
     ]
