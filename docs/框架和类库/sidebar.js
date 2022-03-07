@@ -31,6 +31,7 @@ module.exports = [
       '/框架和类库/notes/Vue扩展-1',
       '/框架和类库/notes/Vue扩展-2',
       '/框架和类库/notes/Vue扩展-3',
+      '/框架和类库/notes/Vue扩展-4',
       '/框架和类库/notes/VueRouter',
       '/框架和类库/notes/Vuex',
     ]
