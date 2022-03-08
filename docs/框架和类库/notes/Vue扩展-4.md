@@ -373,3 +373,67 @@ export function queueActivatedComponent(vm: Component) {
  activatedChildren.push(vm);
 }
 ```
+
+把当前的 `vm` 实例添加到 `activatedChildren` 中，在 `nextTick` 后执行 `flushSchedulerQueue`
+
+```javascript
+function flushSchedulerQueue() {
+ // ... ...
+ // keep copies of post queues before resetting state
+ const activatedQueue = activatedChildren.slice();
+ const updatedQueue = queue.slice();
+
+ resetSchedulerState();
+
+ // call component updated and activated hooks
+ callActivatedHooks(activatedQueue);
+ callUpdatedHooks(updatedQueue);
+
+ // ... ...
+}
+
+function callActivatedHooks(queue) {
+ for (let i = 0; i < queue.length; i++) {
+  queue[i]._inactive = true;
+  activateChildComponent(queue[i], true /* true */);
+ }
+}
+```
+
+也就是遍历所有的 `activatedChildren` 执行 `activateChildComponent` 方法，通过队列方式将整个 `activated` `调用时机延后，deactivated` 发生在 `vnode` 中的 `destory` 钩子函数，定义在`src\core\vdom\create-component.js`
+
+```javascript
+const componentVNodeHooks = {
+ destroy(vnode: MountedComponentVNode) {
+  const { componentInstance } = vnode;
+  if (!componentInstance._isDestroyed) {
+   if (!vnode.data.keepAlive) {
+    componentInstance.$destroy();
+   } else {
+    deactivateChildComponent(componentInstance, true /* direct */);
+   }
+  }
+ },
+};
+```
+
+对于 keepAlive 包裹的组件而言，会执行`deactivateChildComponent`定义在`src\core\instance\lifecycle.js`
+
+```javascript
+export function deactivateChildComponent(vm: Component, direct?: boolean) {
+ if (direct) {
+  vm._directInactive = true;
+  if (isInInactiveTree(vm)) {
+   return;
+  }
+ }
+ if (!vm._inactive) {
+  vm._inactive = true;
+  for (let i = 0; i < vm.$children.length; i++) {
+   deactivateChildComponent(vm.$children[i]);
+  }
+  callHook(vm, "deactivated");
+ }
+}
+```
+递归执行子组件的deactivated钩子
