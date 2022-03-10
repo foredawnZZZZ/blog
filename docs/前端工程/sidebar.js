@@ -17,7 +17,7 @@ module.exports = [
     title: "项目搭建",
     collaspsable: true,
     children: [
-      '/前端工程/notes/项目搭建'
+      '/前端工程/notes/vite',
     ]
   },
   {
