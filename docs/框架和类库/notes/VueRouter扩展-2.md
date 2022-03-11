@@ -1,518 +1,3 @@
-## matcher
-
-`matcher` 相关实现定义在`src\create-matcher.js`,`matcher` 作为路由匹配器，用来匹配 `location` 和 `Route` 的这两个概念定义在`flow\declarations.js`
-
-```javascript
-declare type Location = {
- _normalized?: boolean,
- name?: string,
- path?: string,
- hash?: string,
- query?: Dictionary<string>,
- params?: Dictionary<string>,
- append?: boolean,
- replace?: boolean,
-};
-
-declare type Route = {
- path: string,
- name: ?string,
- hash: string,
- query: Dictionary<string>,
- params: Dictionary<string>,
- fullPath: string,
- matched: Array<RouteRecord>,
- redirectedFrom?: string,
- meta?: any,
-};
-```
-
-`location` 数据结构与 window.location 相似，都是对 `url` 结构的描述，`Route` 表示路由中的线路,`matcher` 的创建来自 `createMatcher` 函数，定义在`src\create-matcher.js`
-
-```javascript
-export function createMatcher(
- routes: Array<RouteConfig>,
- router: VueRouter
-): Matcher {
- const { pathList, pathMap, nameMap } = createRouteMap(routes);
-
- function addRoutes(routes) {
-  createRouteMap(routes, pathList, pathMap, nameMap);
- }
-
- function addRoute(parentOrRoute, route) {
-  const parent =
-   typeof parentOrRoute !== "object" ? nameMap[parentOrRoute] : undefined;
-  // $flow-disable-line
-  createRouteMap([route || parentOrRoute], pathList, pathMap, nameMap, parent);
-
-  // add aliases of parent
-  if (parent && parent.alias.length) {
-   createRouteMap(
-    // $flow-disable-line route is defined if parent is
-    parent.alias.map((alias) => ({ path: alias, children: [route] })),
-    pathList,
-    pathMap,
-    nameMap,
-    parent
-   );
-  }
- }
-
- function getRoutes() {
-  return pathList.map((path) => pathMap[path]);
- }
-
- function match(
-  raw: RawLocation,
-  currentRoute?: Route,
-  redirectedFrom?: Location
- ): Route {
-  const location = normalizeLocation(raw, currentRoute, false, router);
-  const { name } = location;
-
-  if (name) {
-   const record = nameMap[name];
-   if (process.env.NODE_ENV !== "production") {
-    warn(record, `Route with name '${name}' does not exist`);
-   }
-   if (!record) return _createRoute(null, location);
-   const paramNames = record.regex.keys
-    .filter((key) => !key.optional)
-    .map((key) => key.name);
-
-   if (typeof location.params !== "object") {
-    location.params = {};
-   }
-
-   if (currentRoute && typeof currentRoute.params === "object") {
-    for (const key in currentRoute.params) {
-     if (!(key in location.params) && paramNames.indexOf(key) > -1) {
-      location.params[key] = currentRoute.params[key];
-     }
-    }
-   }
-
-   location.path = fillParams(
-    record.path,
-    location.params,
-    `named route "${name}"`
-   );
-   return _createRoute(record, location, redirectedFrom);
-  } else if (location.path) {
-   location.params = {};
-   for (let i = 0; i < pathList.length; i++) {
-    const path = pathList[i];
-    const record = pathMap[path];
-    if (matchRoute(record.regex, location.path, location.params)) {
-     return _createRoute(record, location, redirectedFrom);
-    }
-   }
-  }
-  // no match
-  return _createRoute(null, location);
- }
-
- // ... ...
-
- return {
-  match,
-  addRoute,
-  getRoutes,
-  addRoutes,
- };
-}
-```
-
-该方法接受两个参数，一个用户自定义的配置，一个 `VueRouter` 实例，首先逻辑是调用 `createRouteMap` 创建一个路由映射表定义在`src\create-route-map.js`
-
-```javascript
-export function createRouteMap(
- routes: Array<RouteConfig>,
- oldPathList?: Array<string>,
- oldPathMap?: Dictionary<RouteRecord>,
- oldNameMap?: Dictionary<RouteRecord>,
- parentRoute?: RouteRecord
-): {
- pathList: Array<string>,
- pathMap: Dictionary<RouteRecord>,
- nameMap: Dictionary<RouteRecord>,
-} {
- // the path list is used to control path matching priority
- const pathList: Array<string> = oldPathList || [];
- // $flow-disable-line
- const pathMap: Dictionary<RouteRecord> = oldPathMap || Object.create(null);
- // $flow-disable-line
- const nameMap: Dictionary<RouteRecord> = oldNameMap || Object.create(null);
-
- routes.forEach((route) => {
-  addRouteRecord(pathList, pathMap, nameMap, route, parentRoute);
- });
-
- // ensure wildcard routes are always at the end
- for (let i = 0, l = pathList.length; i < l; i++) {
-  if (pathList[i] === "*") {
-   pathList.push(pathList.splice(i, 1)[0]);
-   l--;
-   i--;
-  }
- }
- // ... ...
-
- return {
-  pathList,
-  pathMap,
-  nameMap,
- };
-}
-```
-
-`createRouteMap` 函数目标是把用户的路由表转换为一张映射表，`pathList` 存储所有的 `path`，`pathMap` 表示一个 `path` 到 `RouteRecord` 的映射关系，`nameMap` 表示 `name` 到 `RouteRecord` 的映射关系，`RouteRecord` 的概念定义在`flow\declarations.js`
-
-```javascript
-declare type RouteRecord = {
- path: string,
- alias: Array<string>,
- regex: RouteRegExp,
- components: Dictionary<any>,
- instances: Dictionary<any>,
- enteredCbs: Dictionary<Array<Function>>,
- name: ?string,
- parent: ?RouteRecord,
- redirect: ?RedirectOption,
- matchAs: ?string,
- beforeEnter: ?NavigationGuard,
- meta: any,
- props: boolean | Object | Function | Dictionary<boolean | Object | Function>,
-};
-```
-
-通过遍历 routes 为每一个 route 执行 addRouteRecord 方法生成记录
-
-```javascript
-function addRouteRecord(
- pathList: Array<string>,
- pathMap: Dictionary<RouteRecord>,
- nameMap: Dictionary<RouteRecord>,
- route: RouteConfig,
- parent?: RouteRecord,
- matchAs?: string
-) {
- const { path, name } = route;
- if (process.env.NODE_ENV !== "production") {
-  assert(path != null, `"path" is required in a route configuration.`);
-  assert(
-   typeof route.component !== "string",
-   `route config "component" for path: ${String(path || name)} cannot be a ` +
-    `string id. Use an actual component instead.`
-  );
-
-  warn(
-   // eslint-disable-next-line no-control-regex
-   !/[^\u0000-\u007F]+/.test(path),
-   `Route with path "${path}" contains unencoded characters, make sure ` +
-    `your path is correctly encoded before passing it to the router. Use ` +
-    `encodeURI to encode static segments of your path.`
-  );
- }
-
- const pathToRegexpOptions: PathToRegexpOptions =
-  route.pathToRegexpOptions || {};
- const normalizedPath = normalizePath(path, parent, pathToRegexpOptions.strict);
-
- if (typeof route.caseSensitive === "boolean") {
-  pathToRegexpOptions.sensitive = route.caseSensitive;
- }
-
- const record: RouteRecord = {
-  path: normalizedPath,
-  regex: compileRouteRegex(normalizedPath, pathToRegexpOptions),
-  components: route.components || { default: route.component },
-  alias: route.alias
-   ? typeof route.alias === "string"
-     ? [route.alias]
-     : route.alias
-   : [],
-  instances: {},
-  enteredCbs: {},
-  name,
-  parent,
-  matchAs,
-  redirect: route.redirect,
-  beforeEnter: route.beforeEnter,
-  meta: route.meta || {},
-  props:
-   route.props == null
-    ? {}
-    : route.components
-    ? route.props
-    : { default: route.props },
- };
-
- if (route.children) {
-  // Warn if route is named, does not redirect and has a default child route.
-  // If users navigate to this route by name, the default child will
-  // not be rendered (GH Issue #629)
-  if (process.env.NODE_ENV !== "production") {
-   if (
-    route.name &&
-    !route.redirect &&
-    route.children.some((child) => /^\/?$/.test(child.path))
-   ) {
-    warn(
-     false,
-     `Named Route '${route.name}' has a default child route. ` +
-      `When navigating to this named route (:to="{name: '${route.name}'"), ` +
-      `the default child route will not be rendered. Remove the name from ` +
-      `this route and use the name of the default child route for named ` +
-      `links instead.`
-    );
-   }
-  }
-  route.children.forEach((child) => {
-   const childMatchAs = matchAs
-    ? cleanPath(`${matchAs}/${child.path}`)
-    : undefined;
-   addRouteRecord(pathList, pathMap, nameMap, child, record, childMatchAs);
-  });
- }
-
- if (!pathMap[record.path]) {
-  pathList.push(record.path);
-  pathMap[record.path] = record;
- }
-
- if (route.alias !== undefined) {
-  const aliases = Array.isArray(route.alias) ? route.alias : [route.alias];
-  for (let i = 0; i < aliases.length; ++i) {
-   const alias = aliases[i];
-   if (process.env.NODE_ENV !== "production" && alias === path) {
-    warn(
-     false,
-     `Found an alias with the same value as the path: "${path}". You have to remove that alias. It will be ignored in development.`
-    );
-    // skip in dev to make it work
-    continue;
-   }
-
-   const aliasRoute = {
-    path: alias,
-    children: route.children,
-   };
-   addRouteRecord(
-    pathList,
-    pathMap,
-    nameMap,
-    aliasRoute,
-    parent,
-    record.path || "/" // matchAs
-   );
-  }
- }
-
- if (name) {
-  if (!nameMap[name]) {
-   nameMap[name] = record;
-  } else if (process.env.NODE_ENV !== "production" && !matchAs) {
-   warn(
-    false,
-    `Duplicate named routes definition: ` +
-     `{ name: "${name}", path: "${record.path}" }`
-   );
-  }
- }
-}
-```
-
-`path` 是规范化后的路径，他会根据 `parent` 的 `path` 做计算，`regx` 是正则扩展，`components` 是路由组件，`instances` 是路由实例，`parent` 是父 `RouteRecord`，因为路由表可以配置子路由，所以结构是树状的，设置了 `children` 就会进行递归，最后拿到一个完整的记录。由于 `pathList，pathMap，nameMap` 都是引用类型在遍历执行 `addRouteRecord` 方法时会不断给源对象添加数据，整个 `createRouteMap` 方法执行完，就会得到完成的对象。最后回到 `createMatcher` 中，定义一系列方法后，最终返回一个对象，所以 `matcher` 是一个对象，他对外暴露了 `match` 和 `addRoute` 等方法
-
-**addRoute**
-`addRoutes` 方法是动态添加路由配置，部分开发场景下路由表不能写死，需要一些条件动态增加路由，本质就是在次调用 `createRouteMap`，传入新的配置，根据引用类型特征，修改配置。
-**match**
-
-```javascript
-function match(
- raw: RawLocation,
- currentRoute?: Route,
- redirectedFrom?: Location
-): Route {
- const location = normalizeLocation(raw, currentRoute, false, router);
- const { name } = location;
-
- if (name) {
-  const record = nameMap[name];
-  if (process.env.NODE_ENV !== "production") {
-   warn(record, `Route with name '${name}' does not exist`);
-  }
-  if (!record) return _createRoute(null, location);
-  const paramNames = record.regex.keys
-   .filter((key) => !key.optional)
-   .map((key) => key.name);
-
-  if (typeof location.params !== "object") {
-   location.params = {};
-  }
-
-  if (currentRoute && typeof currentRoute.params === "object") {
-   for (const key in currentRoute.params) {
-    if (!(key in location.params) && paramNames.indexOf(key) > -1) {
-     location.params[key] = currentRoute.params[key];
-    }
-   }
-  }
-
-  location.path = fillParams(
-   record.path,
-   location.params,
-   `named route "${name}"`
-  );
-  return _createRoute(record, location, redirectedFrom);
- } else if (location.path) {
-  location.params = {};
-  for (let i = 0; i < pathList.length; i++) {
-   const path = pathList[i];
-   const record = pathMap[path];
-   if (matchRoute(record.regex, location.path, location.params)) {
-    return _createRoute(record, location, redirectedFrom);
-   }
-  }
- }
- // no match
- return _createRoute(null, location);
-}
-```
-
-该方法接受三个参数，raw 是一个 url 字符串，currentRoute 是当前 Route 类型，表示当前路径，match 方法返回一个路径，根据传入的 raw 和当前的路径 currentRoute 计算出一个新的路径并返回。
-首先执行 normalizeLocation，定义在`src\util\location.js`
-
-```javascript
-export function normalizeLocation(
- raw: RawLocation,
- current: ?Route,
- append: ?boolean,
- router: ?VueRouter
-): Location {
- let next: Location = typeof raw === "string" ? { path: raw } : raw;
- // named target
- if (next._normalized) {
-  return next;
- } else if (next.name) {
-  next = extend({}, raw);
-  const params = next.params;
-  if (params && typeof params === "object") {
-   next.params = extend({}, params);
-  }
-  return next;
- }
-
- // relative params
- if (!next.path && next.params && current) {
-  next = extend({}, next);
-  next._normalized = true;
-  const params: any = extend(extend({}, current.params), next.params);
-  if (current.name) {
-   next.name = current.name;
-   next.params = params;
-  } else if (current.matched.length) {
-   const rawPath = current.matched[current.matched.length - 1].path;
-   next.path = fillParams(rawPath, params, `path ${current.path}`);
-  } else if (process.env.NODE_ENV !== "production") {
-   warn(false, `relative params navigation requires a current route.`);
-  }
-  return next;
- }
-
- const parsedPath = parsePath(next.path || "");
- const basePath = (current && current.path) || "/";
- const path = parsedPath.path
-  ? resolvePath(parsedPath.path, basePath, append || next.append)
-  : basePath;
-
- const query = resolveQuery(
-  parsedPath.query,
-  next.query,
-  router && router.options.parseQuery
- );
-
- let hash = next.hash || parsedPath.hash;
- if (hash && hash.charAt(0) !== "#") {
-  hash = `#${hash}`;
- }
-
- return {
-  _normalized: true,
-  path,
-  query,
-  hash,
- };
-}
-```
-
-根据 `raw` 和 `current` 计算出新的 `location`，一种是有 `params` 且没有 `path`，一种是有 `path` 的，对于第一种情况，如果 `current` 有 `name`，则计算出 `location` 也有 `name`，计算完毕后对 `location` 的 `name` 和 `path` 两种情况做处理。
-
-- name
-  有 `name` 的情况下根据 `nameMap` 匹配到 `record（RouterRecord ）`，如果 `record` 不存在，则匹配失败，返回一个空路径；然后拿到 `record` 对应的 `paramNames`，再对比 `currentRoute` 中的 `params`，把交集部分的 `params` 添加到 `location` 中，然后在通过 `fillParams` 方法计算出 `location.path`，最后调用`_createRoute` 去生成一个新路径
-- path
-  通过 `name` 可以快速查找 `record`，但是计算后的 `location.path` 是一个真实路径，而 `record` 中的路径可能会有 `param`，所以需要对 `pathList` 做顺序遍历，然后通过 `matchRoute` 方法根据 `record.regex`, `location.path`, `location.params` 去生成新路径。因为是顺序遍历所以写在前面的优先匹配
-
-`_createRoute` 最终会调用 `createRoute` 方法 定义在
-
-```javascript
-function _createRoute(
- record: ?RouteRecord,
- location: Location,
- redirectedFrom?: Location
-): Route {
- if (record && record.redirect) {
-  return redirect(record, redirectedFrom || location);
- }
- if (record && record.matchAs) {
-  return alias(record, location, record.matchAs);
- }
- return createRoute(record, location, redirectedFrom, router);
-}
-
-export function createRoute(
- record: ?RouteRecord,
- location: Location,
- redirectedFrom?: ?Location,
- router?: VueRouter
-): Route {
- const stringifyQuery = router && router.options.stringifyQuery;
-
- let query: any = location.query || {};
- try {
-  query = clone(query);
- } catch (e) {}
-
- const route: Route = {
-  name: location.name || (record && record.name),
-  meta: (record && record.meta) || {},
-  path: location.path || "/",
-  hash: location.hash || "",
-  query,
-  params: location.params || {},
-  fullPath: getFullPath(location, stringifyQuery),
-  matched: record ? formatMatch(record) : [],
- };
- if (redirectedFrom) {
-  route.redirectedFrom = getFullPath(redirectedFrom, stringifyQuery);
- }
- return Object.freeze(route);
-}
-
-function formatMatch(record: ?RouteRecord): Array<RouteRecord> {
- const res = [];
- while (record) {
-  res.unshift(record);
-  record = record.parent;
- }
- return res;
-}
-```
-
-根据 `record` 和 `location` 创建一个 `Route` 路径，所有的 `Route` 最终都会通过 `createRoute` 函数创建并且外部无法修改，它带有 `matched` 属性，它通过 formatMatch 方法计算而来，通过 record 向上查找 parent，直到最外层，把所有的 record 都推入一个数组中，最终返回，他记录了一条线路上所有的 record，辅助后面的渲染工作。
-
 ## 导航守卫
 
 当切换路由时，便会执行到 `history.transitionTo`
@@ -854,4 +339,483 @@ function bindGuard(guard: NavigationGuard, instance: ?_Vue): ?NavigationGuard {
 }
 ```
 
-把组件的实例 `instance` 作为函数执行的上下文绑定到 `guard` 上，那么对于 `extractLeaveGuards` 函数而言，获取到的就是所有失活组件中定义的 `beforeRouteLeave` 钩子
+把组件的实例 `instance` 作为函数执行的上下文绑定到 `guard` 上，那么对于 `extractLeaveGuards` 函数而言，获取到的就是所有失活组件中定义的 `beforeRouteLeave` 钩子;
+第二步是 `this.router.beforeHooks`,在我们的 `VueRouter` 类中定义 `beforeEach` 方法，定义在`src\index.js`中：
+
+```javascript
+beforeEach (fn: Function): Function {
+  return registerHook(this.beforeHooks, fn)
+}
+
+function registerHook (list: Array<any>, fn: Function): Function {
+  list.push(fn)
+  return () => {
+    const i = list.indexOf(fn)
+    if (i > -1) list.splice(i, 1)
+  }
+}
+```
+
+当使用 `beforeEach` 时就会向 `beforeHooks` 里面添加一个钩子函数，这样 `this.router.beforeHooks` 获取的就是用户注册的全局 `beforeEach` 守卫;第三步执行 `extractUpdateHooks`
+
+```javascript
+function extractUpdateHooks(updated: Array<RouteRecord>): Array<?Function> {
+ return extractGuards(updated, "beforeRouteUpdate", bindGuard);
+}
+```
+
+获取所有重用组件中定义的 `beforeRouteUpdate` 钩子函数;
+第四步是执行 `activated` 中存储的 `beforeEnter` 函数，获取激活路由配置中定义的钩子;
+第五步是执行 `resolveAsyncComponents`，解析异步组件`src\util\resolve-components.js`
+
+```javascript
+export function resolveAsyncComponents(matched: Array<RouteRecord>): Function {
+ return (to, from, next) => {
+  let hasAsync = false;
+  let pending = 0;
+  let error = null;
+
+  flatMapComponents(matched, (def, _, match, key) => {
+   // if it's a function and doesn't have cid attached,
+   // assume it's an async component resolve function.
+   // we are not using Vue's default async resolving mechanism because
+   // we want to halt the navigation until the incoming component has been
+   // resolved.
+   if (typeof def === "function" && def.cid === undefined) {
+    hasAsync = true;
+    pending++;
+
+    const resolve = once((resolvedDef) => {
+     if (isESModule(resolvedDef)) {
+      resolvedDef = resolvedDef.default;
+     }
+     // save resolved on async factory in case it's used elsewhere
+     def.resolved =
+      typeof resolvedDef === "function"
+       ? resolvedDef
+       : _Vue.extend(resolvedDef);
+     match.components[key] = resolvedDef;
+     pending--;
+     if (pending <= 0) {
+      next();
+     }
+    });
+
+    const reject = once((reason) => {
+     const msg = `Failed to resolve async component ${key}: ${reason}`;
+     process.env.NODE_ENV !== "production" && warn(false, msg);
+     if (!error) {
+      error = isError(reason) ? reason : new Error(msg);
+      next(error);
+     }
+    });
+
+    let res;
+    try {
+     res = def(resolve, reject);
+    } catch (e) {
+     reject(e);
+    }
+    if (res) {
+     if (typeof res.then === "function") {
+      res.then(resolve, reject);
+     } else {
+      // new syntax in Vue 2.3
+      const comp = res.component;
+      if (comp && typeof comp.then === "function") {
+       comp.then(resolve, reject);
+      }
+     }
+    }
+   }
+  });
+
+  if (!hasAsync) next();
+ };
+}
+```
+
+返回一个带有标准参数的导航钩子，利用 `flatMapComponents` 方法从 `matched` 中获取到每个组件，如果是异步组件执行异步逻辑，加载成功后放到对应的 `components` 上，在执行 `next` 函数;
+当执行到 `runQueue` 方法时，第六步：在激活组件里调用 `beforeRouteEnter`
+
+```javascript
+runQueue(queue, iterator, () => {
+  const enterGuards = extractEnterGuar(activated)
+}
+function extractEnterGuards (
+  activated: Array<RouteRecord>
+): Array<?Function> {
+  return extractGuards(
+    activated,
+    'beforeRouteEnter',
+    (guard, _, match, key) => {
+      return bindEnterGuard(guard, match, key)
+    }
+  )
+}
+function bindEnterGuard (
+  guard: NavigationGuard,
+  match: RouteRecord,
+  key: string
+): NavigationGuard {
+  return function routeEnterGuard (to, from, next) {
+    return guard(to, from, cb => {
+      if (typeof cb === 'function') {
+        if (!match.enteredCbs[key]) {
+          match.enteredCbs[key] = []
+        }
+        match.enteredCbs[key].push(cb)
+      }
+      next(cb)
+    })
+  }
+}
+```
+
+`extractEnterGuards` 同样利用 `extractGuards` 方法获取组件中的 `beforeRouteEnter` 钩子，注意当守卫执行前，组件实例没有创建，所以拿不到组件实例，要通过传递一个回调給 next 方法访问组件实例；
+第七步:执行全局的 `beforeResolve` 守卫
+
+```javascript
+const queue = enterGuards.concat(this.router.resolveHooks)
+
+beforeResolve (fn: Function): Function {
+  return registerHook(this.resolveHooks, fn)
+}
+```
+
+使用 `router.beoforeResolve` 注册一个全局守卫，就会向 `resloveHooks` 添加一个钩子函数;
+第八步是在最后执行 onComplete,它是传入得到的匿名函数，
+
+```javascript
+this.confirmTransition(
+  route,
+  () => {
+    this.updateRoute(route)
+    onComplete && onComplete(route)
+    this.ensureURL()
+    this.router.afterHooks.forEach(hook => {
+      hook && hook(route, prev)
+    })
+  },
+)
+
+afterEach (fn: Function): Function {
+  return registerHook(this.afterHooks, fn)
+}
+```
+
+当使用 router.afterEnter 注册一个全局守卫，就会往 router.afterHooks 添加一个钩子函数。**至此所有的导航守卫执行完毕，是伴随着路由切换完成的，从表面现象来看 url 会发生变化，组件也会发生变化**
+
+## url 变化
+
+当点击 `router-link` 时最终会执行 `router.push` 方法，定义在`src\index.js`
+
+```javascript
+push (location: RawLocation, onComplete?: Function,onAbort?: Function) {
+  // $flow-disable-line
+  if (!onComplete && !onAbort && typeof Promise !=='undefined') {
+    return new Promise((resolve, reject) => {
+      this.history.push(location, resolve, reject)
+    })
+  } else {
+    this.history.push(location, onComplete, onAbort)
+  }
+}
+```
+
+`this.history` 是基于子类实现的，在不同的 `mode` 下实现不同，以 `hash` 为类，`push` 方法定义在`src\history\hash.js`
+
+```javascript
+push (location: RawLocation, onComplete?: Function,onAbort?: Function) {
+  const { current: fromRoute } = this
+  this.transitionTo(
+    location,
+    route => {
+      pushHash(route.fullPath)
+      handleScroll(this.router, route, fromRoute, false)
+      onComplete && onComplete(route)
+    },
+    onAbort
+  )
+}
+```
+
+`push` 函数会先执行 `this.transtionTo` 做路径切换，在切换完成的回调函数中，执行 `pushHash` 函数：
+
+```javascript
+function pushHash(path) {
+ if (supportsPushState) {
+  pushState(getUrl(path));
+ } else {
+  window.location.hash = path;
+ }
+}
+```
+
+`supportsPushState` 的定义`src\util\push-state.js`
+
+```javascript
+export const supportsPushState =
+ inBrowser &&
+ (function () {
+  const ua = window.navigator.userAgent;
+
+  if (
+   (ua.indexOf("Android 2.") !== -1 || ua.indexOf("Android 4.0") !== -1) &&
+   ua.indexOf("Mobile Safari") !== -1 &&
+   ua.indexOf("Chrome") === -1 &&
+   ua.indexOf("Windows Phone") === -1
+  ) {
+   return false;
+  }
+
+  return window.history && typeof window.history.pushState === "function";
+ })();
+```
+
+处理兼容性，获取当前完整的 `url`，执行 `pushState` 方法
+
+```javascript
+export function pushState(url?: string, replace?: boolean) {
+ saveScrollPosition();
+ // try...catch the pushState call to get around Safari
+ // DOM Exception 18 where it limits to 100 pushState calls
+ const history = window.history;
+ try {
+  if (replace) {
+   // preserve existing history state as it could be overriden by the user
+   const stateCopy = extend({}, history.state);
+   stateCopy.key = getStateKey();
+   history.replaceState(stateCopy, "", url);
+  } else {
+   history.pushState({ key: setStateKey(genStateKey()) }, "", url);
+  }
+ } catch (e) {
+  window.location[replace ? "replace" : "assign"](url);
+ }
+}
+```
+
+`pushState` 会调用浏览器原生的 `history` 的 `pushState` 接口或者 `replaceState` 接口，更新浏览器的 `url` 地址并且把当前的 `url` 压入历史记录中，然后再 `history` 的初始化中，会设置一个监听器，监听历史栈的变化
+
+```javascript
+  setupListeners () {
+    if (this.listeners.length > 0) {
+      return
+    }
+
+    const router = this.router
+    const expectScroll = router.options.scrollBehavior
+    const supportsScroll = supportsPushState && expectScroll
+
+    if (supportsScroll) {
+      this.listeners.push(setupScroll())
+    }
+
+    const handleRoutingEvent = () => {
+      const current = this.current
+      if (!ensureSlash()) {
+        return
+      }
+      this.transitionTo(getHash(), route => {
+        if (supportsScroll) {
+          handleScroll(this.router, route, current, true)
+        }
+        if (!supportsPushState) {
+          replaceHash(route.fullPath)
+        }
+      })
+    }
+    const eventType = supportsPushState ? 'popstate' : 'hashchange'
+    window.addEventListener(
+      eventType,
+      handleRoutingEvent
+    )
+    this.listeners.push(() => {
+      window.removeEventListener(eventType, handleRoutingEvent)
+    })
+  }
+```
+
+当点击浏览器返回按钮时，如果已经有 `url` 被压入历史栈当中，则会触发 `popstate` 事件，然后拿到当前要跳转的 `hash`，执行 `transitionTo` 方法做路径切换。
+
+## 组件渲染
+
+Vue-Router 提供了内置组件 routerView，用它来完成最终的视图出口定义在`src\components\view.js`
+
+```javascript
+export default {
+ name: "RouterView",
+ functional: true,
+ props: {
+  name: {
+   type: String,
+   default: "default",
+  },
+ },
+ render(_, { props, children, parent, data }) {
+  // used by devtools to display a router-view badge
+  data.routerView = true;
+
+  // directly use parent context's createElement() function
+  // so that components rendered by router-view can resolve named slots
+  const h = parent.$createElement;
+  const name = props.name;
+  const route = parent.$route;
+  const cache = parent._routerViewCache || (parent._routerViewCache = {});
+
+  // determine current view depth, also check to see if the tree
+  // has been toggled inactive but kept-alive.
+  let depth = 0;
+  let inactive = false;
+  while (parent && parent._routerRoot !== parent) {
+   const vnodeData = parent.$vnode ? parent.$vnode.data : {};
+   if (vnodeData.routerView) {
+    depth++;
+   }
+   if (vnodeData.keepAlive && parent._directInactive && parent._inactive) {
+    inactive = true;
+   }
+   parent = parent.$parent;
+  }
+  data.routerViewDepth = depth;
+
+  // render previous view if the tree is inactive and kept-alive
+  if (inactive) {
+   const cachedData = cache[name];
+   const cachedComponent = cachedData && cachedData.component;
+   if (cachedComponent) {
+    // #2301
+    // pass props
+    if (cachedData.configProps) {
+     fillPropsinData(
+      cachedComponent,
+      data,
+      cachedData.route,
+      cachedData.configProps
+     );
+    }
+    return h(cachedComponent, data, children);
+   } else {
+    // render previous empty view
+    return h();
+   }
+  }
+
+  const matched = route.matched[depth];
+  const component = matched && matched.components[name];
+
+  // render empty node if no matched route or no config component
+  if (!matched || !component) {
+   cache[name] = null;
+   return h();
+  }
+
+  // cache component
+  cache[name] = { component };
+
+  // attach instance registration hook
+  // this will be called in the instance's injected lifecycle hooks
+  data.registerRouteInstance = (vm, val) => {
+   // val could be undefined for unregistration
+   const current = matched.instances[name];
+   if ((val && current !== vm) || (!val && current === vm)) {
+    matched.instances[name] = val;
+   }
+  };
+
+  // also register instance in prepatch hook
+  // in case the same component instance is reused across different routes
+  (data.hook || (data.hook = {})).prepatch = (_, vnode) => {
+   matched.instances[name] = vnode.componentInstance;
+  };
+
+  // register instance in init hook
+  // in case kept-alive component be actived when routes changed
+  data.hook.init = (vnode) => {
+   if (
+    vnode.data.keepAlive &&
+    vnode.componentInstance &&
+    vnode.componentInstance !== matched.instances[name]
+   ) {
+    matched.instances[name] = vnode.componentInstance;
+   }
+
+   // if the route transition has already been confirmed then we weren't
+   // able to call the cbs during confirmation as the component was not
+   // registered yet, so we call it here.
+   handleRouteEntered(route);
+  };
+
+  const configProps = matched.props && matched.props[name];
+  // save route and configProps in cache
+  if (configProps) {
+   extend(cache[name], {
+    route,
+    configProps,
+   });
+   fillPropsinData(component, data, route, configProps);
+  }
+
+  return h(component, data, children);
+ },
+};
+```
+
+定义为一个函数组件，渲染依赖于 `render` 函数，它首先获取当前组件的路径`const route = parent.$route`;
+
+```javascript
+Object.defineProperty(Vue.prototype, "$route", {
+ get() {
+  return this._routerRoot._route;
+ },
+});
+
+history.listen(route => {
+  this.apps.forEach((app) => {
+    app._route = route
+  })
+})
+
+listen (cb: Function) {
+  this.cb = cb
+}
+
+updateRoute (route: Route) {
+  this.current = route
+  this.cb && this.cb(route)
+}
+```
+
+也就是 `transitionTo` 方法最后会执行 `updateRoute` 更新 `this.apps` 里面保存的组件实例的`_route` 的值，`this.apps` 数组保存的实例特点是在初始化的时期传入的 `router` 配置项，一般场景下数组只会保存根实例，因为在 `new Vue` 配置对象中传入 `router` 实例。`$route`是定义在`Vue.prototype`上，每个实例访问`$route` 属性实际上访问根实例的`_route`，也就是当前的路由线路。
+另外 `routerView` 是支持嵌套的 `depth` 表示嵌套的深度，`parent._routerRoot` 表示的是根实例，这个 `while` 循环就是从当前的 `routerView` 的父实例上向上找直到找到根实例为止，在这个过程如果碰到父实例也是 `routerView` 的时候，说明存在嵌套 `depth++`，然后根据当前匹配的路径和 `depth` 找到响应的 `RouteRecord`，再去找到需要渲染的组件；之后会去定义一个 `registerRouteInstance` 方法，提供路由注册实例的方法，给 `vnode` 的 `data` 绑定上
+
+```javascript
+const registerInstance = (vm, callVal) => {
+ let i = vm.$options._parentVnode;
+ if (isDef(i) && isDef((i = i.data)) && isDef((i = i.registerRouteInstance))) {
+  i(vm, callVal);
+ }
+};
+
+Vue.mixin({
+ beforeCreate() {
+  // ... ...
+  registerInstance();
+ },
+});
+```
+
+在混入的 `beforeCreate` 钩子函数中，会执行 `registerInstance` 方法，进而执行 `render` 函数中定义的 `registerRouteInstance` 给 `matched.instances[name]`赋值当前组件实例，最后根据 `component` 渲染对应的组件 `vndoe`.
+当重新切换路径时会再次调用 `transitionTo` 方法，在混入时调用过`util.defineReactive`
+
+```javascript
+Vue.mixin({
+ beforeCreate() {
+  // ... ...
+  Vue.util.defineReactive(this, "_route", this._router.history.current);
+ },
+});
+```
+
+这个方法会把`_route` 转换为响应式的，在每个 `routerView` 执行 `render` 函数时，都会访问 `parent.$route`,便会触发他的 `getter`，当执行完 `transitionTo` 后，修改当前的 `app._route` 的时候又会触发他的 `setter`，因为 `routeView` 的渲染 `wathcer` 就会重新渲染组件。
