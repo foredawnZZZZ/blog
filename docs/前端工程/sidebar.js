@@ -24,7 +24,7 @@ module.exports = [
     title: "开发提速",
     collaspsable: true,
     children: [
-      '/前端工程/notes/开发提速'
+      '/前端工程/notes/脚手架工具'
     ]
   }
 ]
